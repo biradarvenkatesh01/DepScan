@@ -119,18 +119,18 @@ export default function App() {
 
   return (
     <div className="app-container">
-      {/* Decorative cosmic background nebulae */}
+      {/* Decorative ambient background orbs */}
       <div className="nebula-bg-1" />
       <div className="nebula-bg-2" />
 
-      {/* Header */}
+      {/* Sticky Header */}
       <header className="app-header">
         <div className="logo-container">
           <div className="logo-icon">DS</div>
           <div className="logo-text">DepScan</div>
           <div className="logo-badge">v1.0</div>
         </div>
-        <div style={{ color: 'var(--text-secondary)', fontSize: '0.82rem', fontWeight: 500 }}>
+        <div style={{ color: 'var(--text-muted)', fontSize: '0.78rem', fontFamily: 'var(--font-mono)', letterSpacing: '0.03em' }}>
           Google OSV.dev Integration
         </div>
       </header>
@@ -161,20 +161,26 @@ export default function App() {
                 <span>Transitive Resolution</span>
                 <span>Remediation Copilot</span>
               </div>
-              <h1 style={{ marginTop: '0.5rem' }}>
-                Secure Your <span className="text-gradient-cyan-purple">Open-Source Code</span>
+              <h1>
+                Audit your{' '}
+                <span className="text-gradient-cyan-purple">open-source</span>{' '}
+                dependencies.
               </h1>
               <p>
-                Upload your package manifest to resolve nested dependencies, query the Google OSV catalog, and generate rich security audit logs with instant fix suggestions.
+                Upload a package manifest to resolve nested dependencies, cross-reference the Google OSV catalog, and generate rich security audit reports with instant remediation commands.
               </p>
               <div className="hero-stats">
                 <div>
                   <strong>100% Free</strong>
-                  <span>Community OSV check</span>
+                  <span>Community OSV checks</span>
                 </div>
                 <div>
-                  <strong>JSON & PDF</strong>
-                  <span>Audit report exports</span>
+                  <strong>PDF + JSON</strong>
+                  <span>Export audit reports</span>
+                </div>
+                <div>
+                  <strong>npm · PyPI</strong>
+                  <span>Multi-ecosystem</span>
                 </div>
               </div>
             </div>
@@ -191,9 +197,11 @@ export default function App() {
         borderTop: '1px solid var(--glass-border)', 
         textAlign: 'center',
         color: 'var(--text-muted)',
-        fontSize: '0.78rem'
+        fontSize: '0.76rem',
+        fontFamily: 'var(--font-mono)',
+        letterSpacing: '0.04em',
       }}>
-        DepScan Dependency Tracker &copy; 2026. Powered by Google OSV Database API.
+        DepScan &copy; 2026 — Open-Source Security Audit powered by Google OSV
       </footer>
     </div>
   );

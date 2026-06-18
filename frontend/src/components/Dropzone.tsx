@@ -86,7 +86,7 @@ export default function Dropzone({ onFileSelected, isLoading }: DropzoneProps) {
   };
 
   return (
-    <div className="glass-card" style={{ maxWidth: '800px', width: '100%', margin: '2rem auto' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '0' }}>
       <label 
         className={`dropzone ${isDragActive ? 'active' : ''}`}
         onDragEnter={handleDrag}
@@ -104,15 +104,15 @@ export default function Dropzone({ onFileSelected, isLoading }: DropzoneProps) {
         />
         
         <div className="dropzone-icon-container">
-          <span className="dropzone-icon">📡</span>
+          <span className="dropzone-icon">🛡️</span>
         </div>
         
         <div>
           <h3 className="dropzone-title">
-            {isDragActive ? 'Drop manifest file here' : 'Drag & drop dependency file'}
+            {isDragActive ? 'Release to initiate scan' : 'Drop your manifest file'}
           </h3>
           <p className="dropzone-subtitle">
-            or click to select package.json or requirements.txt
+            or click to browse — supports package.json, package-lock.json, requirements.txt
           </p>
         </div>
 
@@ -123,36 +123,36 @@ export default function Dropzone({ onFileSelected, isLoading }: DropzoneProps) {
         </div>
       </label>
 
-      {/* Quickstart / Sample scans section */}
+      {/* Quickstart sample manifests */}
       <div className="quickstart-container">
-        <span className="quickstart-title">Quick Test Pre-loaded manifests</span>
+        <span className="quickstart-title">— or try a sample scan —</span>
         <div className="quickstart-buttons">
           <button 
             className="quickstart-btn" 
             onClick={() => handleLoadSample('node')}
             disabled={isLoading}
           >
-            🚀 node (lodash/axios)
+            node · lodash + axios
           </button>
           <button 
             className="quickstart-btn" 
             onClick={() => handleLoadSample('node-react')}
             disabled={isLoading}
           >
-            ⚛️ node-react (react/axios)
+            react · axios
           </button>
           <button 
             className="quickstart-btn" 
             onClick={() => handleLoadSample('python')}
             disabled={isLoading}
           >
-            🐍 python (requests/jinja2)
+            python · requests + jinja2
           </button>
         </div>
       </div>
 
       {error && (
-        <div className="error-banner" style={{ marginTop: '1.5rem', marginBottom: 0 }}>
+        <div className="error-banner" style={{ marginTop: '1.25rem', marginBottom: 0 }}>
           <span>⚠️ <strong>Error:</strong> {error}</span>
           <button className="error-close" onClick={() => setError(null)}>&times;</button>
         </div>
