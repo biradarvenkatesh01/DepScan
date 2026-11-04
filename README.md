@@ -1,22 +1,29 @@
 # DepScan - Open-Source Dependency Vulnerability Tracker
 
-DepScan is a state-of-the-art, interactive dependency scanner and vulnerability tracker that integrates with the Google OSV database to identify CVE security alerts in Node.js and Python projects. 
+DepScan scans Node.js and Python manifests for known vulnerabilities. It resolves the full dependency tree, checks every package version against the Google OSV database, and turns the result into a clear upgrade plan.
 
-Designed with a premium **cyber-obsidian glassmorphic interface**, it features an animated hacking-terminal log scanner, dynamic SVG chart metrics, an interactive dependency tree explorer, and a single-click copy-remediation center.
+The interface is a warm, editorial layout: cream paper in light mode and warm charcoal in dark mode, with hairline rules, square corners and spec-sheet labels. It follows your system setting until you pick a mode with the sun/moon toggle. Type is set in Hanken Grotesk, with JetBrains Mono for labels, figures and code.
 
 ---
 
-## 🚀 Key Features
+## Key Features
 
-* **Dual-Ecosystem Parser**: Directly parses Node.js manifests (`package.json`, `package-lock.json`) and Python requirements (`requirements.txt`), recursively resolving nested transitive dependencies.
-* **Google OSV API Integration**: Batch queries the official Google OSV vulnerability catalog in chunks of 500 for high-performance security checks.
-* **Animated Scan Terminal**: Replaces generic loaders with a mock hacking terminal that outputs real-time log traces of package parsing, transitive resolution, and CVE detections.
-* **Tabbed Security Dashboard**:
-  1. **Overview Panel**: Displays glowing metric cards, interactive SVG donut severity charts, and filters.
-  2. **Dependency Map Tree**: A visual nested layout mapping direct libraries to nested child CVE advisories.
-  3. **Remediation Action Center**: An upgrade desk generating copy-paste CLI terminal shortcuts (`npm install` / `pip install`) to remediate vulnerabilities.
-* **Slide-Out Details Drawer**: Transitioning from the right, this panel details CVSS scores, advisory summaries, and verified external reference links.
-* **Executive PDF Audits**: Generates professional, download-ready PDF reports including an executive overview and cover sheet.
+* **Four ways to scan**: drop a file, paste manifest contents (the format is detected automatically), point at a public GitHub repo or folder (`owner/repo` or a `github.com/.../tree/branch/path` link), or check a single npm/PyPI package by name and version.
+* **Full tree resolution**: parses `package.json`, `package-lock.json` (v1–v3) and `requirements.txt`, and resolves transitive dependencies up to three levels. Each package records whether it is direct and which parent pulled it in; for lockfiles that comes from a breadth-first walk using Node's own `node_modules` lookup rules.
+* **Real advisory data**: batch-queries OSV, then fetches each advisory's full record for its CVSS vector (scored with the CVSS 3.x formula), summary, aliases and fixed versions. Fix versions come from the affected range that contains your installed version.
+* **Health grade**: an A–F grade and 0–100 health score with a severity distribution.
+* **Report views**:
+  1. **Overview**: the most urgent advisories, the most exposed packages, and the direct/transitive mix.
+  2. **Packages**: searchable, sortable table with severity filters and a direct-only toggle (press `/` to search).
+  3. **Tree**: collapsible dependency tree that can narrow to only the paths leading to vulnerable packages, with a count of vulnerable packages below each node.
+  4. **Advisories**: every CVE/GHSA, filterable by severity and fix availability, sortable by score or date.
+  5. **Fix plan**: one upgrade per package to the lowest version that clears every fixable advisory, merged into a single copyable `npm install` / `pip install` command. Major-version jumps are flagged, and unpatched advisories get their own list.
+* **Patched manifest download**: get your `package.json` or `requirements.txt` back with the selected fixes applied. Range style (`^`, `~`, `==`), indentation, extras and comments are preserved; transitive npm fixes go into `overrides`, and transitive Python fixes are appended as pins.
+* **Since last scan**: rescanning the same project shows new and resolved advisories and version changes compared with the previous scan.
+* **Ignore advisories**: mark one as *Not reachable*, *Dev only*, *Accepted risk* or *False positive*. Ignored advisories drop out of the grade, counts and exports, and can be restored at any time.
+* **Detail sheet**: per-package advisories with a CVSS bar, an "introduced via" path, an upgrade command, and OSV/reference links.
+* **Exports**: PDF report, JSON, CSV, a Markdown summary for a PR or Slack, or a shields.io README badge showing the grade.
+* **Recent scans**: the last eight scans are kept in your browser (localStorage only).
 
 ---
 
@@ -24,7 +31,7 @@ Designed with a premium **cyber-obsidian glassmorphic interface**, it features a
 
 ### Frontend
 * **Core**: React 19, TypeScript, Vite
-* **Styling**: Vanilla HSL CSS Variables, Glassmorphism, animations
+* **Styling**: Vanilla CSS with light/dark design tokens; Hanken Grotesk + JetBrains Mono (Google Fonts); no UI framework
 * **APIs**: Axios (multipart/form-data & binary downloads)
 
 ### Backend
@@ -46,11 +53,13 @@ DepScan/
 └── frontend/                 # React SPA Client
     ├── src/
     │   ├── components/
-    │   │   ├── Dashboard.tsx # Metrics, SVGs, Tree map, Action Center, Drawer
-    │   │   ├── Dropzone.tsx  # Upload interface with pre-loaded manifest tests
-    │   │   └── ScanningTerminal.tsx # Simulated log streamer component
-    │   ├── App.tsx           # Layout wrapper and entry nebulae animations
-    │   └── index.css         # Cyber-obsidian theme & styling system
+    │   │   ├── Landing.tsx, Composer.tsx   # Hero, upload / paste / single-package input, history
+    │   │   ├── ScanProgress.tsx            # Scan progress steps
+    │   │   ├── Dashboard.tsx               # Report header, grade, severity summary, tabs
+    │   │   └── report/                     # Overview, Packages, Advisories, Fix plan, detail sheet
+    │   ├── lib/                            # Grading, fix plan, exports, storage, toasts
+    │   ├── App.tsx                         # Layout, palette picker, scan flow
+    │   └── index.css                       # Design tokens and component styles
     └── index.html            # App viewport mount
 ```
 

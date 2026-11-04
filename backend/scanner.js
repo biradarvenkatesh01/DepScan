@@ -1,4 +1,5 @@
 import axios from 'axios';
+import semver from 'semver';
 
 /**
  * Split array into chunks of a specific size
@@ -9,6 +10,65 @@ function chunkArray(array, size) {
     chunks.push(array.slice(i, i + size));
   }
   return chunks;
+}
+
+// Advisory records rarely change, so cache them for the life of the process
+const vulnCache = new Map();
+const DETAIL_CONCURRENCY = 16;
+
+/**
+ * Fetches full OSV advisory records by ID with a small worker pool.
+ * Returns a Map of id -> record; failed lookups are simply omitted.
+ */
+async function fetchVulnDetails(ids) {
+  const results = new Map();
+  const pending = [];
+  for (const id of ids) {
+    if (vulnCache.has(id)) results.set(id, vulnCache.get(id));
+    else pending.push(id);
+  }
+
+  let cursor = 0;
+  const worker = async () => {
+    while (cursor < pending.length) {
+      const id = pending[cursor++];
+      try {
+        const response = await axios.get(`https://api.osv.dev/v1/vulns/${encodeURIComponent(id)}`, { timeout: 10000 });
+        vulnCache.set(id, response.data);
+        results.set(id, response.data);
+      } catch (error) {
+        console.error(`Error fetching OSV advisory ${id}:`, error.message);
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(DETAIL_CONCURRENCY, pending.length) }, worker));
+  return results;
+}
+
+/**
+ * Computes a CVSS v3 base score from a vector string such as
+ * CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H
+ */
+function cvss3BaseScore(vector) {
+  const m = Object.fromEntries(vector.split('/').slice(1).map(p => p.split(':')));
+  const W = {
+    AV: { N: 0.85, A: 0.62, L: 0.55, P: 0.2 },
+    AC: { L: 0.77, H: 0.44 },
+    UI: { N: 0.85, R: 0.62 },
+    CIA: { H: 0.56, L: 0.22, N: 0 },
+  };
+  const changed = m.S === 'C';
+  const PR = { N: 0.85, L: changed ? 0.68 : 0.62, H: changed ? 0.5 : 0.27 }[m.PR];
+  const av = W.AV[m.AV], ac = W.AC[m.AC], ui = W.UI[m.UI];
+  const c = W.CIA[m.C], i = W.CIA[m.I], a = W.CIA[m.A];
+  if ([PR, av, ac, ui, c, i, a].some(x => x === undefined)) return null;
+
+  const iss = 1 - (1 - c) * (1 - i) * (1 - a);
+  const impact = changed ? 7.52 * (iss - 0.029) - 3.25 * Math.pow(iss - 0.02, 15) : 6.42 * iss;
+  if (impact <= 0) return 0;
+  const exploitability = 8.22 * av * ac * PR * ui;
+  const raw = changed ? Math.min(1.08 * (impact + exploitability), 10) : Math.min(impact + exploitability, 10);
+  return Math.ceil(raw * 10) / 10;
 }
 
 /**
@@ -43,6 +103,9 @@ function parseSeverity(vuln) {
   }
 
   // 3. Try parsing CVSS vector to extract score if vector is found (e.g. CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H)
+  if (score === null && vector && /^CVSS:3/.test(vector)) {
+    score = cvss3BaseScore(vector);
+  }
   if (score === null && vector) {
     // If vector is a number already, e.g. "9.8" or "CVSS:3.1/AV:N/.../BaseScore: 9.8"
     const scoreMatch = vector.match(/cvss|score|base/i) || vector.includes('/');
@@ -84,31 +147,57 @@ function parseSeverity(vuln) {
 /**
  * Extracts the recommended fixed version (if any) from the vulnerability record.
  */
-function getFixedVersion(vuln, packageName) {
-  let fixedVersion = null;
+/**
+ * Loose version comparison: semver when both parse, otherwise numeric
+ * segment-by-segment (good enough for PEP 440 release versions).
+ */
+function compareVersions(a, b) {
+  const sa = semver.valid(semver.coerce(a, { loose: true }));
+  const sb = semver.valid(semver.coerce(b, { loose: true }));
+  if (semver.valid(a) && semver.valid(b)) return semver.compare(a, b);
+  if (sa && sb && semver.compare(sa, sb) !== 0) return semver.compare(sa, sb);
+  const pa = String(a).split(/[.\-+]/), pb = String(b).split(/[.\-+]/);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const x = parseInt(pa[i] ?? '0', 10), y = parseInt(pb[i] ?? '0', 10);
+    if (!Number.isNaN(x) && !Number.isNaN(y) && x !== y) return x - y;
+  }
+  return 0;
+}
 
-  if (vuln.affected && Array.isArray(vuln.affected)) {
-    for (const affected of vuln.affected) {
-      // Ensure the package name matches
-      const affectedPkgName = affected.package?.name?.toLowerCase();
-      if (affectedPkgName === packageName.toLowerCase()) {
-        if (affected.ranges && Array.isArray(affected.ranges)) {
-          for (const range of affected.ranges) {
-            if (range.events && Array.isArray(range.events)) {
-              for (const event of range.events) {
-                if (event.fixed) {
-                  // Keep the highest/latest fix if multiple are present
-                  fixedVersion = event.fixed;
-                }
-              }
-            }
-          }
+/**
+ * Finds the fix for the affected range that contains `version`.
+ * OSV lists one range per release line (e.g. 0.x and 1.x), so taking the
+ * last `fixed` event can point a 0.21 install at a 1.x release.
+ */
+function getFixedVersion(vuln, packageName, version) {
+  const candidates = [];
+
+  for (const affected of vuln.affected || []) {
+    if (affected.package?.name?.toLowerCase() !== packageName.toLowerCase()) continue;
+    for (const range of affected.ranges || []) {
+      // GIT ranges use commit hashes, which aren't installable versions
+      if (range.type === 'GIT') continue;
+      let introduced = '0';
+      for (const event of range.events || []) {
+        if (event.introduced !== undefined) introduced = event.introduced;
+        if (event.fixed) {
+          candidates.push({ introduced, fixed: event.fixed });
+          introduced = null;
         }
       }
     }
   }
+  if (candidates.length === 0) return null;
 
-  return fixedVersion;
+  const inRange = candidates.find(c =>
+    (c.introduced === '0' || c.introduced === null || compareVersions(version, c.introduced) >= 0) &&
+    compareVersions(version, c.fixed) < 0
+  );
+  if (inRange) return inRange.fixed;
+
+  // Otherwise the nearest fix above the installed version
+  const above = candidates.map(c => c.fixed).filter(f => compareVersions(f, version) > 0).sort(compareVersions);
+  return above[0] || null;
 }
 
 /**
@@ -155,6 +244,13 @@ export async function scanDependencies(packages) {
     }
   }
 
+  // querybatch only returns { id, modified } per advisory, so pull full records
+  const uniqueIds = new Set();
+  for (const result of osvResults) {
+    for (const v of result?.vulns || []) uniqueIds.add(v.id);
+  }
+  const details = await fetchVulnDetails([...uniqueIds]);
+
   const vulnerabilities = [];
   const cleanPackages = new Set(packages.map(p => `${p.name}@${p.version}`));
 
@@ -166,9 +262,10 @@ export async function scanDependencies(packages) {
     if (result && result.vulns && Array.isArray(result.vulns)) {
       cleanPackages.delete(`${pkg.name}@${pkg.version}`);
 
-      for (const vuln of result.vulns) {
+      for (const stub of result.vulns) {
+        const vuln = details.get(stub.id) || stub;
         const { score, level } = parseSeverity(vuln);
-        const fixedVersion = getFixedVersion(vuln, pkg.name);
+        const fixedVersion = getFixedVersion(vuln, pkg.name, pkg.version);
         const isUnpatched = !fixedVersion;
 
         // Extract identifier (prefer CVE, then GHSA, then OSV ID)
@@ -193,7 +290,9 @@ export async function scanDependencies(packages) {
             ? 'No patch currently available' 
             : `Upgrade to version ${fixedVersion} or higher`,
           references: vuln.references || [],
-          published: vuln.published
+          aliases: vuln.aliases || [],
+          published: vuln.published,
+          modified: vuln.modified
         });
       }
     }

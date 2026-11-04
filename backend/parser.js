@@ -49,7 +49,7 @@ async function fetchPypiMetadata(packageName) {
  * Resolves the concrete version of an NPM package matching a version range,
  * and recursively gathers its transitive dependencies.
  */
-async function resolveNpmTransitive(packageName, range, depth, resolvedList, visited) {
+async function resolveNpmTransitive(packageName, range, depth, resolvedList, visited, parent = null) {
   const visitKey = `${packageName}@${range}`;
   if (visited.has(visitKey) || depth > MAX_DEPTH) return;
   visited.add(visitKey);
@@ -81,7 +81,9 @@ async function resolveNpmTransitive(packageName, range, depth, resolvedList, vis
   resolvedList.set(uniqueId, {
     name: packageName,
     version: concreteVersion,
-    ecosystem: 'npm'
+    ecosystem: 'npm',
+    direct: depth === 1,
+    parent
   });
 
   // Fetch transitive dependencies of this concrete version
@@ -89,7 +91,7 @@ async function resolveNpmTransitive(packageName, range, depth, resolvedList, vis
   if (versionData && versionData.dependencies) {
     const deps = versionData.dependencies;
     const promises = Object.entries(deps).map(([depName, depRange]) =>
-      resolveNpmTransitive(depName, depRange, depth + 1, resolvedList, visited)
+      resolveNpmTransitive(depName, depRange, depth + 1, resolvedList, visited, packageName)
     );
     await Promise.all(promises);
   }
@@ -99,7 +101,7 @@ async function resolveNpmTransitive(packageName, range, depth, resolvedList, vis
  * Resolves the concrete version of a Python package matching a requirement,
  * and recursively gathers its transitive dependencies.
  */
-async function resolvePypiTransitive(packageName, specifiers, depth, resolvedList, visited) {
+async function resolvePypiTransitive(packageName, specifiers, depth, resolvedList, visited, parent = null) {
   const normalizedName = packageName.toLowerCase().replace(/_/g, '-');
   const visitKey = `${normalizedName}@${specifiers}`;
   if (visited.has(visitKey) || depth > MAX_DEPTH) return;
@@ -141,7 +143,9 @@ async function resolvePypiTransitive(packageName, specifiers, depth, resolvedLis
   resolvedList.set(uniqueId, {
     name: normalizedName,
     version: concreteVersion,
-    ecosystem: 'PyPI'
+    ecosystem: 'PyPI',
+    direct: depth === 1,
+    parent
   });
 
   // Fetch info for this concrete version to get its dependencies (requires_dist)
@@ -164,7 +168,7 @@ async function resolvePypiTransitive(packageName, specifiers, depth, resolvedLis
         if (match) {
           const depName = match[1];
           const depSpecifiers = match[2] || '';
-          promises.push(resolvePypiTransitive(depName, depSpecifiers, depth + 1, resolvedList, visited));
+          promises.push(resolvePypiTransitive(depName, depSpecifiers, depth + 1, resolvedList, visited, normalizedName));
         }
       }
       await Promise.all(promises);
@@ -204,38 +208,98 @@ function parsePackageLock(jsonContent) {
 
   // Modern v2 and v3 package-lock files use "packages"
   if (data.packages) {
-    for (const [key, pkg] of Object.entries(data.packages)) {
-      if (key === '' || !pkg.version) continue;
-      // Extract package name from paths like node_modules/lodash or node_modules/a/node_modules/b
-      const parts = key.split('node_modules/');
-      const name = parts[parts.length - 1];
+    const entries = data.packages;
+    const nameOf = key => key.slice(key.lastIndexOf('node_modules/') + 'node_modules/'.length);
+    const depsOf = pkg => Object.keys({
+      ...(pkg.dependencies || {}),
+      ...(pkg.devDependencies || {}),
+      ...(pkg.optionalDependencies || {})
+    });
+
+    // Mirrors Node's lookup: <from>/node_modules/<dep>, then each ancestor up to the root
+    const resolveKey = (fromKey, dep) => {
+      let base = fromKey;
+      for (;;) {
+        const candidate = `${base ? base + '/' : ''}node_modules/${dep}`;
+        if (entries[candidate]) return candidate;
+        if (!base) return null;
+        const cut = base.lastIndexOf('/node_modules/');
+        base = cut === -1 ? '' : base.slice(0, cut);
+      }
+    };
+
+    // Breadth-first from the root so every package gets its shortest introducing parent
+    const parentOf = new Map();
+    const rootDeps = new Set();
+    const queue = [];
+    for (const dep of depsOf(entries[''] || {})) {
+      const key = resolveKey('', dep);
+      if (key && !parentOf.has(key)) {
+        parentOf.set(key, null);
+        rootDeps.add(key);
+        queue.push(key);
+      }
+    }
+    while (queue.length) {
+      const key = queue.shift();
+      for (const dep of depsOf(entries[key])) {
+        const child = resolveKey(key, dep);
+        if (child && !parentOf.has(child)) {
+          parentOf.set(child, nameOf(key));
+          queue.push(child);
+        }
+      }
+    }
+
+    // Visit reachable packages first (in BFS order), then anything orphaned
+    const ordered = [...parentOf.keys(), ...Object.keys(entries).filter(k => !parentOf.has(k))];
+    for (const key of ordered) {
+      const pkg = entries[key];
+      if (key === '' || !pkg?.version || pkg.link) continue;
+      const name = nameOf(key);
       if (!name) continue;
 
       const uniqueId = `${name}@${pkg.version}`;
+      if (resolvedList.has(uniqueId)) continue;
       resolvedList.set(uniqueId, {
         name,
         version: pkg.version,
-        ecosystem: 'npm'
+        ecosystem: 'npm',
+        direct: rootDeps.has(key),
+        parent: parentOf.get(key) ?? null
       });
     }
   } 
   // Legacy v1 format uses "dependencies" object recursively
   else if (data.dependencies) {
-    const traverse = (deps) => {
+    // v1 hoists transitive packages to the top level, so a top-level entry is
+    // only "direct" when no other package lists it under `requires`
+    const required = new Set();
+    const collectRequires = (deps) => {
+      for (const dep of Object.values(deps)) {
+        Object.keys(dep.requires || {}).forEach(n => required.add(n));
+        if (dep.dependencies) collectRequires(dep.dependencies);
+      }
+    };
+    collectRequires(data.dependencies);
+
+    const traverse = (deps, parent) => {
       for (const [name, dep] of Object.entries(deps)) {
         if (!dep.version) continue;
         const uniqueId = `${name}@${dep.version}`;
         resolvedList.set(uniqueId, {
           name,
           version: dep.version,
-          ecosystem: 'npm'
+          ecosystem: 'npm',
+          direct: parent === null && !required.has(name),
+          parent
         });
         if (dep.dependencies) {
-          traverse(dep.dependencies);
+          traverse(dep.dependencies, name);
         }
       }
     };
-    traverse(data.dependencies);
+    traverse(data.dependencies, null);
   }
 
   return Array.from(resolvedList.values());
