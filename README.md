@@ -107,7 +107,7 @@ The frontend and backend are deployed separately: Vercel runs the Express API, a
 
 `netlify.toml` already configures the build (base `frontend`, `npm run build`, publish `dist`, Node 22), so import the repository into Netlify and keep the detected settings.
 
-Then point it at the API:
+`netlify.toml` also sets `VITE_API_URL` to the live backend (`https://dep-scan-alpha.vercel.app`). To use a different backend, change it there, or override it in Netlify:
 
 1. In Netlify, go to **Site configuration → Environment variables**.
 2. Add `VITE_API_URL` with your backend URL, e.g. `https://depscan-api.vercel.app` (no trailing slash, no `/api`).

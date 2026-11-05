@@ -5,6 +5,8 @@
 
 [build.environment]
   NODE_VERSION = "22"
+  # Backend API on Vercel; read by Vite at build time
+  VITE_API_URL = "https://dep-scan-alpha.vercel.app"
 
 [[redirects]]
   from   = "/*"
