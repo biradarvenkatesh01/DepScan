@@ -86,7 +86,12 @@ app.post('/api/report', async (req, res) => {
   }
 });
 
-// Start server
-app.listen(port, () => {
-  console.log(`DepScan API server is running on port ${port}`);
-});
+// On Vercel the platform handles requests through the exported app, so only
+// start a listener when running as a normal Node server (local dev, Render, etc.)
+if (!process.env.VERCEL) {
+  app.listen(port, () => {
+    console.log(`DepScan API server is running on port ${port}`);
+  });
+}
+
+export default app;

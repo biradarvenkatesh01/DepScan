@@ -86,3 +86,31 @@ npm install
 npm run dev
 ```
 The development server will run on [http://localhost:5173/](http://localhost:5173/).
+
+---
+
+## 🚀 Deployment
+
+The frontend and backend are deployed separately: Vercel runs the Express API, and Netlify serves the static React app. Every scan and PDF export goes through the API, so the frontend does nothing useful without it.
+
+### 1. Deploy the backend to Vercel
+
+1. In Vercel, choose **Add New → Project** and import this repository.
+2. Set **Root Directory** to `backend`. Vercel detects Express automatically; leave the build settings as they are.
+3. Deploy, then check that `https://<your-backend-url>/api/health` returns `{"status":"healthy",...}`.
+
+`server.js` exports the Express app for Vercel and only calls `app.listen()` when it is not running on Vercel, so the same code still works with `npm run dev` locally or on any other Node host (Render, Railway, Fly.io). CORS is open to all origins, so the Netlify site can call it without extra configuration.
+
+> Vercel limits request bodies to 4.5 MB, slightly below the 5 MB upload limit the API sets, so very large lockfiles may be rejected.
+
+### 2. Deploy the frontend to Netlify
+
+`netlify.toml` already configures the build (base `frontend`, `npm run build`, publish `dist`, Node 22), so import the repository into Netlify and keep the detected settings.
+
+Then point it at the API:
+
+1. In Netlify, go to **Site configuration → Environment variables**.
+2. Add `VITE_API_URL` with your backend URL, e.g. `https://depscan-api.vercel.app` (no trailing slash, no `/api`).
+3. Trigger a new deploy (**Deploys → Trigger deploy → Deploy site**).
+
+`VITE_API_URL` is baked into the bundle at build time, so you must redeploy after setting or changing it. If it is missing, the site falls back to `http://localhost:5000` and scans fail with "Couldn't reach the scanner".
