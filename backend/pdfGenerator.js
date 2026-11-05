@@ -25,14 +25,15 @@ function getSeverityColor(severity) {
 }
 
 /**
- * Calculate simple security rating
+ * Security rating. Uses the same rules as gradeFor() in the frontend
+ * (frontend/src/lib/analysis.ts) so the PDF and the web report always agree.
  */
 function getSecurityRating(summary) {
-  if (summary.critical > 0 || summary.unpatchedCritical > 0) return { grade: 'F', text: 'Critical Risk', color: '#991b1b' };
-  if (summary.high > 0) return { grade: 'D', text: 'High Risk', color: '#c2410c' };
-  if (summary.medium > 0) return { grade: 'C', text: 'Medium Risk', color: '#a16207' };
-  if (summary.low > 0) return { grade: 'B', text: 'Low Risk', color: '#1d4ed8' };
-  return { grade: 'A', text: 'Secure', color: '#15803d' };
+  if (summary.unpatchedCritical > 0 || summary.critical >= 3) return { grade: 'F', text: 'Critical Risk', color: '#991b1b' };
+  if (summary.critical > 0 || summary.high >= 5) return { grade: 'D', text: 'High Risk', color: '#c2410c' };
+  if (summary.high > 0 || summary.medium >= 5) return { grade: 'C', text: 'Elevated', color: '#a16207' };
+  if (summary.total > 0) return { grade: 'B', text: 'Minor Issues', color: '#1d4ed8' };
+  return { grade: 'A', text: 'All Clear', color: '#15803d' };
 }
 
 /**
